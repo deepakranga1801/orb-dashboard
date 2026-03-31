@@ -2,13 +2,14 @@ import React, { useEffect, useState } from "react";
 import "./App.css";
 import SectorChart from "./components/SectorChart";
 
-const API_URL = "http://localhost:3000/data";
+//const API_URL = "http://localhost:3000/data";
+const API_URL = process.env.REACT_APP_API_URL + "/data";
 
 function App() {
 
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
-  const [snapshots, setSnapshots] = useState({});
+  //const [snapshots, setSnapshots] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -59,7 +60,7 @@ function App() {
       }
 
       const json = JSON.parse(text);
-      setSnapshots(json);
+      //setSnapshots(json);
 
     } catch (err) {
       console.error("SNAPSHOT ERROR:", err);
@@ -89,7 +90,7 @@ function App() {
 
   const fetchSector = async () => {
     try {
-      const res = await fetch("http://localhost:3000/sector-performance");
+      const res = await fetch(process.env.REACT_APP_API_URL + "/sector-performance");
       const json = await res.json();
       setSectorData(json);
     } catch (e) {
