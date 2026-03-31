@@ -43,7 +43,8 @@ function App() {
   // ===== FETCH SNAPSHOTS (FIXED) =====
   const fetchSnapshots = async () => {
     try {
-      const res = await fetch("http://localhost:3000/snapshots");
+      //const res = await fetch("http://localhost:3000/snapshots");
+      const res = await fetch(process.env.REACT_APP_API_URL + "/snapshots");
 
       // ❌ If API not found → skip
       if (!res.ok) {
