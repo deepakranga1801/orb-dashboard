@@ -3,7 +3,9 @@ import "./App.css";
 import SectorChart from "./components/SectorChart";
 
 //const API_URL = "http://localhost:3000/data";
-const API_URL = process.env.REACT_APP_API_URL + "/data";
+//const API_URL = process.env.REACT_APP_API_URL + "/data";
+const BASE_URL = process.env.REACT_APP_API_URL || "https://orb-dashboard-dlp8.onrender.com";
+const API_URL = BASE_URL + "/data";
 
 function App() {
 
@@ -27,9 +29,15 @@ function App() {
   const fetchData = async () => {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15 sec
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30 sec
 
     const res = await fetch(API_URL, { signal: controller.signal });
+    //const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error("API failed: " + res.status);
+    }
+
     const json = await res.json();
 
     clearTimeout(timeout);
@@ -44,7 +52,10 @@ function App() {
   const fetchSnapshots = async () => {
     try {
       //const res = await fetch("http://localhost:3000/snapshots");
-      const res = await fetch(process.env.REACT_APP_API_URL + "/snapshots");
+      const res = await fetch(
+        //process.env.REACT_APP_API_URL + "/snapshots"
+        BASE_URL + "/snapshots"
+      );
 
       // ❌ If API not found → skip
       if (!res.ok) {
@@ -91,9 +102,18 @@ function App() {
 
   const fetchSector = async () => {
     try {
-      const res = await fetch(process.env.REACT_APP_API_URL + "/sector-performance");
+      const res = await fetch(
+        //process.env.REACT_APP_API_URL + "/sector-performance"
+        BASE_URL + "/sector-performance"
+      );
+
       //const json = await res.json();
+      if (!res.ok) {
+        throw new Error("API failed: " + res.status);
+      }
+
       const json = await res.json();
+
       //setData(json);   // or whatever you're doing
       setSectorData(json);
     } catch (e) {
