@@ -9,7 +9,7 @@ function App() {
 
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
-  const [snapshots, setSnapshots] = useState({});
+  const [, setSnapshots] = useState({});
 
   useEffect(() => {
     fetchData();
