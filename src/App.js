@@ -91,9 +91,9 @@ function App() {
 
   const fetchSector = async () => {
     try {
-      const response = await fetch(process.env.REACT_APP_API_URL + "/sector-performance");
+      const res = await fetch(process.env.REACT_APP_API_URL + "/sector-performance");
       //const json = await res.json();
-      const json = await response.json();
+      const json = await res.json();
       setData(json);   // or whatever you're doing
       setSectorData(json);
     } catch (e) {
