@@ -48,7 +48,7 @@ const sectors = [
 app.get("/sector-performance", async (req, res) => {
   try {
 
-    const requests = sectors.map(s => () =>
+    const requests = sectors.map(sec => () =>
       axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}.NS?interval=5m&range=1d`)
         .catch(() => null)
     );
@@ -145,7 +145,7 @@ async function captureSnapshots() {
 async function fetchORBData() {
 
   const requests = stocks.map(s => () =>
-    axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}.NS?interval=5m&range=2d`)
+    axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`)
       .catch(() => null)
   );
 
