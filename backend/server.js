@@ -7,7 +7,16 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-// ✅ IST HELPER (CRITICAL FIX)
+// ✅ AXIOS CONFIG (CRITICAL FIX FOR YAHOO)
+const axiosInstance = axios.create({
+  headers: {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
+  },
+  timeout: 10000
+});
+
+// ✅ IST HELPER
 function toIST(ts) {
   return new Date(new Date(ts * 1000).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
 }
@@ -38,8 +47,9 @@ const sectors = [
 // ===== SECTOR PERFORMANCE =====
 app.get("/sector-performance", async (req, res) => {
   try {
+
     const requests = sectors.map(sec =>
-      axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}?interval=5m&range=1d`, { timeout: 10000 })
+      axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}?interval=5m&range=1d`)
         .catch(() => null)
     );
 
@@ -47,11 +57,11 @@ app.get("/sector-performance", async (req, res) => {
 
     let output = [];
 
-    responses.forEach((res, i) => {
+    responses.forEach((r, i) => {
       try {
-        if (!res || !res.data.chart.result) return;
+        if (!r || !r.data?.chart?.result) return;
 
-        const closes = res.data.chart.result[0].indicators.quote[0].close;
+        const closes = r.data.chart.result[0].indicators.quote[0].close;
 
         const first = closes.find(v => v != null);
         const last = closes[closes.length - 1];
@@ -75,11 +85,9 @@ app.get("/sector-performance", async (req, res) => {
   }
 });
 
-// ===== GET LTP TIME (FIXED IST) =====
+// ===== GET LTP =====
 function getLTPAtTime(timestamps, closes, targetHour, targetMin, todayDate) {
-
   for (let i = 0; i < timestamps.length; i++) {
-
     let ist = toIST(timestamps[i]);
 
     if (ist.getDate() !== todayDate) continue;
@@ -91,18 +99,15 @@ function getLTPAtTime(timestamps, closes, targetHour, targetMin, todayDate) {
       return closes[i];
     }
   }
-
   return null;
 }
 
 // ===== SNAPSHOT =====
 async function captureSnapshots() {
-
   const now = new Date();
   const times = ["09:30", "09:45", "10:00", "10:15"];
 
   for (let t of times) {
-
     if (!morningSnapshots[t]) {
 
       const [h, m] = t.split(":").map(Number);
@@ -111,7 +116,6 @@ async function captureSnapshots() {
       snapshotTime.setHours(h, m, 0, 0);
 
       if (now >= snapshotTime) {
-
         const data = await fetchORBData();
 
         morningSnapshots[t] = data.map(row => ({
@@ -123,11 +127,11 @@ async function captureSnapshots() {
   }
 }
 
-// ===== MAIN =====
+// ===== MAIN FUNCTION =====
 async function fetchORBData() {
 
   const requests = stocks.map(s =>
-    axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`, { timeout: 10000 })
+    axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`)
       .catch(() => null)
   );
 
@@ -139,7 +143,7 @@ async function fetchORBData() {
 
     try {
 
-      if (!res || !res.data.chart.result) {
+      if (!res || !res.data?.chart?.result) {
         output.push(["No Data"]);
         return;
       }
@@ -147,19 +151,14 @@ async function fetchORBData() {
       const result = res.data.chart.result[0];
       const q = result.indicators.quote[0];
 
-      const highs = q.high;
-      const lows = q.low;
-      const closes = q.close;
-      const volumes = q.volume;
-      const opens = q.open;
+      const { high: highs, low: lows, close: closes, volume: volumes, open: opens } = q;
       const timestamps = result.timestamp;
 
-      if (!highs || highs.length < 20) {
+      if (!highs || highs.length < 5) {
         output.push(["No Data"]);
         return;
       }
 
-      // ✅ FIX IST DATE
       const lastIST = toIST(timestamps[timestamps.length - 1]);
       const todayDate = lastIST.getDate();
 
@@ -168,11 +167,8 @@ async function fetchORBData() {
       const ltp_1000 = getLTPAtTime(timestamps, closes, 10, 0, todayDate);
       const ltp_1015 = getLTPAtTime(timestamps, closes, 10, 15, todayDate);
 
-      let greenCount = 0;
-      let redCount = 0;
-
-      let todayIdx = [];
-      let prevIdx = [];
+      let greenCount = 0, redCount = 0;
+      let todayIdx = [], prevIdx = [];
 
       for (let i = 0; i < timestamps.length; i++) {
 
@@ -204,18 +200,10 @@ async function fetchORBData() {
 
       const percentChange = prevClose ? ((ltp - prevClose) / prevClose) : 0;
 
-      let orbIdx = [];
-
-      for (let i of todayIdx) {
-
+      let orbIdx = todayIdx.filter(i => {
         let d = toIST(timestamps[i]);
-        let h = d.getHours();
-        let m = d.getMinutes();
-
-        if (h === 9 && m >= 15 && m < 30) {
-          orbIdx.push(i);
-        }
-      }
+        return d.getHours() === 9 && d.getMinutes() >= 15 && d.getMinutes() < 30;
+      });
 
       if (orbIdx.length < 3) {
         output.push(["No ORB"]);
@@ -227,43 +215,7 @@ async function fetchORBData() {
       const orHigh = Math.max(...first3.map(i => highs[i]));
       const orLow = Math.min(...first3.map(i => lows[i]));
 
-      let signal = "WAIT";
-      if (ltp > orHigh) signal = "BUY";
-      else if (ltp < orLow) signal = "SELL";
-
-      let breakoutTime = "";
-      let breakoutActive = false;
-
-      for (let i of todayIdx) {
-
-        let d = toIST(timestamps[i]);
-        let h = d.getHours();
-        let m = d.getMinutes();
-
-        if (h > 9 || (h === 9 && m >= 30)) {
-
-          let close = closes[i];
-
-          if (!breakoutActive) {
-
-            if (close > orHigh || close < orLow) {
-              breakoutActive = true;
-
-              breakoutTime = d.toLocaleTimeString("en-IN", {
-                hour: "2-digit",
-                minute: "2-digit"
-              });
-            }
-
-          } else {
-
-            if (close <= orHigh && close >= orLow) {
-              breakoutActive = false;
-              breakoutTime = "";
-            }
-          }
-        }
-      }
+      let signal = ltp > orHigh ? "BUY" : ltp < orLow ? "SELL" : "WAIT";
 
       const prevHigh = Math.max(...prevIdx.map(i => highs[i]));
       const prevLow = Math.min(...prevIdx.map(i => lows[i]));
@@ -272,23 +224,20 @@ async function fetchORBData() {
       if (ltp > prevHigh) pdStatus = "ABOVE PD HIGH";
       else if (ltp < prevLow) pdStatus = "BELOW PD LOW";
 
-      const todayOpen = opens[todayIdx[0]];
-      const gapPercent = ((todayOpen - prevClose) / prevClose);
-
       const currentVol = todayIdx.reduce((a, i) => a + (volumes[i] || 0), 0);
       const prevVol = prevIdx.reduce((a, i) => a + (volumes[i] || 0), 0);
 
-      const volX = prevVol ? (currentVol / prevVol) : 0;
+      const volX = prevVol ? currentVol / prevVol : 0;
 
+      // ✅ RSI FIX
       let gains = 0, losses = 0;
-
       for (let i = closes.length - 15; i < closes.length - 1; i++) {
         let ch = closes[i + 1] - closes[i];
         if (ch > 0) gains += ch;
         else losses -= ch;
       }
 
-      let rs = gains / losses;
+      let rs = losses === 0 ? 100 : gains / losses;
       let rsi = 100 - (100 / (1 + rs));
 
       const orbPercent = orHigh ? ((ltp - orHigh) / orHigh) : 0;
@@ -309,21 +258,21 @@ async function fetchORBData() {
         prevLow,
         pdStatus,
         volX,
-        breakoutTime,
+        "",
         greenCount,
         redCount,
         orbPercent,
-        gapPercent,
+        0,
         ltp_930,
         ltp_945,
         ltp_1000,
         ltp_1015
       ]);
 
-    } catch {
+    } catch (e) {
+      console.log("ERROR:", stocks[index].symbol);
       output.push(["ERROR"]);
     }
-
   });
 
   return output;
@@ -335,7 +284,6 @@ let lastFetchTime = 0;
 
 app.get("/data", async (req, res) => {
   try {
-
     const now = Date.now();
 
     if (cachedData && now - lastFetchTime < 60000) {
@@ -359,7 +307,6 @@ app.get("/snapshots", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log("🚀 Server running");
-
+  console.log("🚀 Server running on port", PORT);
   setInterval(captureSnapshots, 60000);
 });
