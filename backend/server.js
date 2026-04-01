@@ -7,6 +7,11 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
+// ✅ IST HELPER (CRITICAL FIX)
+function toIST(ts) {
+  return new Date(new Date(ts * 1000).toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+}
+
 // ✅ GLOBAL SNAPSHOTS
 let morningSnapshots = {
   "09:30": null,
@@ -33,9 +38,8 @@ const sectors = [
 // ===== SECTOR PERFORMANCE =====
 app.get("/sector-performance", async (req, res) => {
   try {
-
     const requests = sectors.map(sec =>
-      axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}?interval=5m&range=1d`)
+      axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}?interval=5m&range=1d`, { timeout: 10000 })
         .catch(() => null)
     );
 
@@ -45,11 +49,9 @@ app.get("/sector-performance", async (req, res) => {
 
     responses.forEach((res, i) => {
       try {
-
         if (!res || !res.data.chart.result) return;
 
-        const result = res.data.chart.result[0];
-        const closes = result.indicators.quote[0].close;
+        const closes = res.data.chart.result[0].indicators.quote[0].close;
 
         const first = closes.find(v => v != null);
         const last = closes[closes.length - 1];
@@ -73,19 +75,18 @@ app.get("/sector-performance", async (req, res) => {
   }
 });
 
-// ===== HELPER: GET NEAREST LTP (TODAY ONLY) =====
+// ===== GET LTP TIME (FIXED IST) =====
 function getLTPAtTime(timestamps, closes, targetHour, targetMin, todayDate) {
 
   for (let i = 0; i < timestamps.length; i++) {
 
-    let d = new Date(timestamps[i] * 1000);
+    let ist = toIST(timestamps[i]);
 
-    if (d.getDate() !== todayDate) continue; // ✅ IMPORTANT FIX
+    if (ist.getDate() !== todayDate) continue;
 
-    let h = d.getHours();
-    let m = d.getMinutes();
+    let h = ist.getHours();
+    let m = ist.getMinutes();
 
-    // ✅ FIRST CANDLE AFTER TARGET TIME
     if (h > targetHour || (h === targetHour && m >= targetMin)) {
       return closes[i];
     }
@@ -94,7 +95,7 @@ function getLTPAtTime(timestamps, closes, targetHour, targetMin, todayDate) {
   return null;
 }
 
-// ===== SNAPSHOT CAPTURE (FIXED) =====
+// ===== SNAPSHOT =====
 async function captureSnapshots() {
 
   const now = new Date();
@@ -111,27 +112,22 @@ async function captureSnapshots() {
 
       if (now >= snapshotTime) {
 
-        console.log("📸 Capturing snapshot at", t);
-
         const data = await fetchORBData();
 
-        const snapshotData = data.map(row => ({
+        morningSnapshots[t] = data.map(row => ({
           symbol: row[0],
           ltp: row[2]
         }));
-
-        // ✅ SAVE SNAPSHOT (CRITICAL FIX)
-        morningSnapshots[t] = snapshotData;
       }
     }
   }
 }
 
-// ===== MAIN FUNCTION =====
+// ===== MAIN =====
 async function fetchORBData() {
 
   const requests = stocks.map(s =>
-    axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`)
+    axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`, { timeout: 10000 })
       .catch(() => null)
   );
 
@@ -163,42 +159,39 @@ async function fetchORBData() {
         return;
       }
 
-      const todayDate = new Date(timestamps[timestamps.length - 1] * 1000).getDate();
+      // ✅ FIX IST DATE
+      const lastIST = toIST(timestamps[timestamps.length - 1]);
+      const todayDate = lastIST.getDate();
 
-      // ✅ FIXED LTP TIMES
       const ltp_930  = getLTPAtTime(timestamps, closes, 9, 30, todayDate);
       const ltp_945  = getLTPAtTime(timestamps, closes, 9, 45, todayDate);
       const ltp_1000 = getLTPAtTime(timestamps, closes, 10, 0, todayDate);
       const ltp_1015 = getLTPAtTime(timestamps, closes, 10, 15, todayDate);
 
-      // ===== CANDLE COUNT =====
       let greenCount = 0;
       let redCount = 0;
 
-      for (let i = 0; i < timestamps.length; i++) {
-
-        let d = new Date(timestamps[i] * 1000);
-
-        if (d.getDate() === todayDate) {
-
-          let o = opens[i];
-          let c = closes[i];
-
-          if (o == null || c == null) continue;
-
-          if (c > o) greenCount++;
-          else if (c < o) redCount++;
-        }
-      }
-
-      // ===== SPLIT =====
       let todayIdx = [];
       let prevIdx = [];
 
       for (let i = 0; i < timestamps.length; i++) {
-        let d = new Date(timestamps[i] * 1000).getDate();
-        if (d === todayDate) todayIdx.push(i);
-        else prevIdx.push(i);
+
+        let d = toIST(timestamps[i]);
+
+        if (d.getDate() === todayDate) {
+          todayIdx.push(i);
+
+          let o = opens[i];
+          let c = closes[i];
+
+          if (o != null && c != null) {
+            if (c > o) greenCount++;
+            else if (c < o) redCount++;
+          }
+
+        } else {
+          prevIdx.push(i);
+        }
       }
 
       if (!prevIdx.length) {
@@ -211,26 +204,25 @@ async function fetchORBData() {
 
       const percentChange = prevClose ? ((ltp - prevClose) / prevClose) : 0;
 
-      // ===== ORB =====
       let orbIdx = [];
 
       for (let i of todayIdx) {
 
-        let d = new Date(timestamps[i] * 1000);
+        let d = toIST(timestamps[i]);
         let h = d.getHours();
         let m = d.getMinutes();
 
-        if ((h === 9 && m >= 15) && (h === 9 && m < 30)) {
+        if (h === 9 && m >= 15 && m < 30) {
           orbIdx.push(i);
         }
       }
 
-      const first3 = orbIdx.slice(0, 3);
-
-      if (first3.length < 3) {
+      if (orbIdx.length < 3) {
         output.push(["No ORB"]);
         return;
       }
+
+      const first3 = orbIdx.slice(0, 3);
 
       const orHigh = Math.max(...first3.map(i => highs[i]));
       const orLow = Math.min(...first3.map(i => lows[i]));
@@ -239,13 +231,12 @@ async function fetchORBData() {
       if (ltp > orHigh) signal = "BUY";
       else if (ltp < orLow) signal = "SELL";
 
-      // ===== BREAKOUT =====
       let breakoutTime = "";
       let breakoutActive = false;
 
       for (let i of todayIdx) {
 
-        let d = new Date(timestamps[i] * 1000);
+        let d = toIST(timestamps[i]);
         let h = d.getHours();
         let m = d.getMinutes();
 
@@ -259,7 +250,6 @@ async function fetchORBData() {
               breakoutActive = true;
 
               breakoutTime = d.toLocaleTimeString("en-IN", {
-                timeZone: "Asia/Kolkata",
                 hour: "2-digit",
                 minute: "2-digit"
               });
@@ -290,22 +280,19 @@ async function fetchORBData() {
 
       const volX = prevVol ? (currentVol / prevVol) : 0;
 
-      // ===== RSI =====
-      let period = 14;
       let gains = 0, losses = 0;
 
-      for (let i = closes.length - period - 1; i < closes.length - 1; i++) {
+      for (let i = closes.length - 15; i < closes.length - 1; i++) {
         let ch = closes[i + 1] - closes[i];
         if (ch > 0) gains += ch;
         else losses -= ch;
       }
 
-      let rs = (gains / period) / (losses / period);
+      let rs = gains / losses;
       let rsi = 100 - (100 / (1 + rs));
 
       const orbPercent = orHigh ? ((ltp - orHigh) / orHigh) : 0;
 
-      // ===== OUTPUT =====
       output.push([
         stocks[index].symbol,
         stocks[index].sector,
@@ -333,7 +320,7 @@ async function fetchORBData() {
         ltp_1015
       ]);
 
-    } catch (e) {
+    } catch {
       output.push(["ERROR"]);
     }
 
@@ -342,12 +329,13 @@ async function fetchORBData() {
   return output;
 }
 
+// ===== CACHE =====
 let cachedData = null;
 let lastFetchTime = 0;
 
-// ===== API =====
 app.get("/data", async (req, res) => {
   try {
+
     const now = Date.now();
 
     if (cachedData && now - lastFetchTime < 60000) {
@@ -355,6 +343,7 @@ app.get("/data", async (req, res) => {
     }
 
     const data = await fetchORBData();
+
     cachedData = data;
     lastFetchTime = now;
 
@@ -369,10 +358,8 @@ app.get("/snapshots", (req, res) => {
   res.json(morningSnapshots);
 });
 
-// ===== START =====
 app.listen(PORT, () => {
-  console.log("🚀 Server running on port 3000");
+  console.log("🚀 Server running");
 
-  // ✅ AUTO SNAPSHOT EVERY MINUTE
   setInterval(captureSnapshots, 60000);
 });

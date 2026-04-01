@@ -94,7 +94,7 @@ function App() {
       const res = await fetch(process.env.REACT_APP_API_URL + "/sector-performance");
       //const json = await res.json();
       const json = await res.json();
-      setData(json);   // or whatever you're doing
+      //setData(json);   // or whatever you're doing
       setSectorData(json);
     } catch (e) {
       console.error(e);
