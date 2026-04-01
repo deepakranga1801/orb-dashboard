@@ -9,7 +9,7 @@ function App() {
 
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
-  //const [snapshots, setSnapshots] = useState({});
+  const [snapshots, setSnapshots] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -61,7 +61,7 @@ function App() {
       }
 
       const json = JSON.parse(text);
-      //setSnapshots(json);
+      setSnapshots(json);
 
     } catch (err) {
       console.error("SNAPSHOT ERROR:", err);
