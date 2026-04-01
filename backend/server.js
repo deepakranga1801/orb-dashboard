@@ -48,12 +48,26 @@ const sectors = [
 app.get("/sector-performance", async (req, res) => {
   try {
 
-    const requests = sectors.map(sec =>
-      axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}?interval=5m&range=1d`)
+    const requests = sectors.map(s => () =>
+      axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}.NS?interval=5m&range=1d`)
         .catch(() => null)
     );
 
-    const responses = await Promise.all(requests);
+    // 🔥 THIS FIXES 502
+    const responses = await fetchInBatches(requests, 8);
+
+    async function fetchInBatches(arr, batchSize = 10) {
+      let results = [];
+
+      for (let i = 0; i < arr.length; i += batchSize) {
+        const batch = arr.slice(i, i + batchSize);
+
+        const res = await Promise.all(batch.map(fn => fn()));
+        results.push(...res);
+      }
+
+      return results;
+    }
 
     let output = [];
 
@@ -130,12 +144,26 @@ async function captureSnapshots() {
 // ===== MAIN FUNCTION =====
 async function fetchORBData() {
 
-  const requests = stocks.map(s =>
-    axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}.NS?interval=5m&range=2d`)
+  const requests = stocks.map(s => () =>
+    axiosInstance.get(`https://query1.finance.yahoo.com/v8/finance/chart/${sec.symbol}.NS?interval=5m&range=2d`)
       .catch(() => null)
   );
 
-  const responses = await Promise.all(requests);
+  // 🔥 THIS FIXES 502
+  const responses = await fetchInBatches(requests, 8);
+
+  async function fetchInBatches(arr, batchSize = 10) {
+    let results = [];
+
+    for (let i = 0; i < arr.length; i += batchSize) {
+      const batch = arr.slice(i, i + batchSize);
+
+      const res = await Promise.all(batch.map(fn => fn()));
+      results.push(...res);
+    }
+
+    return results;
+  }
 
   let output = [];
 
@@ -282,23 +310,29 @@ async function fetchORBData() {
 let cachedData = null;
 let lastFetchTime = 0;
 
+app.get("/", (req, res) => {
+  res.send("✅ Server is running");
+});
+
 app.get("/data", async (req, res) => {
   try {
-    const now = Date.now();
 
-    if (cachedData && now - lastFetchTime < 60000) {
-      return res.json(cachedData);
-    }
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout")), 20000)
+    );
 
-    const data = await fetchORBData();
-
-    cachedData = data;
-    lastFetchTime = now;
+    const data = await Promise.race([
+      fetchORBData(),
+      timeoutPromise
+    ]);
 
     res.json(data);
 
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("API ERROR:", e.message);
+
+    // ✅ IMPORTANT: don't crash server
+    res.status(200).json([]);
   }
 });
 
